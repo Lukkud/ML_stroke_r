@@ -3,8 +3,7 @@ title: "ML - udar - R"
 author: "Łukasz Chuchra"
 date: "29.05.2021"
 output: 
-  html_document:
-    css: styles.css
+  github_document
 ---
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
