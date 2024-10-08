@@ -1,0 +1,683 @@
+---
+title: "ML - udar - R"
+author: "Łukasz Chuchra"
+date: "29.05.2021"
+output: 
+  html_document:
+    css: styles.css
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Cel projektu
+
+Celem projektu jest zastosowanie oraz sprawdzenie skuteczności i interpretowalności wybranych modeli ML. Do analizy wykorzystano zbior danych pochodzacy z pliku "udar.csv". Plik ten zawiera 7 zmiennych - 6 numerycznych zmiennych objasniajacych (wiek, cholesterol, CPK, stan_kliniczny, sod, cukier) i 1 zmienna objaśnianą - wynik, przyjmujacą wartość zgon lub stabilny
+
+
+# 2. Odczyt danych
+
+W projekcie użyto następujących bibliotek
+```{r warning=FALSE, message=FALSE}
+library(iBreakDown)
+library(openxlsx)
+library(psych)
+library(magrittr)
+library(class)
+library(ggplot2)
+library(ggpubr)
+library(plotly)
+library(e1071)
+library(MASS)
+library(pROC)
+library(caret)
+library(dplyr)
+library(DALEX)
+library(gbm)
+```
+
+W projekcie użyto danych pochodzących z pliku udar.csv. Odczyt danych z plików źródowych wyglądał następująco
+```{r}
+dane <- read.csv(file.path(getwd(), "udar.csv"), sep=";", dec=".")
+```
+
+# 3. Oczyszczenie danych 
+Na początku sprawdzono podstawowe statystyki danych, żeby sprawdzić jakie parametry przyjmują poszczególne zmienne, czy nie występują braki danych, outliery i jakie związki zachodza pomiędzy zmiennymi.
+```{r}
+describe(dane)
+summary(dane)
+```
+Wsrod badanych zmiennych nie stwierdzono braków danych.
+
+Aby móc zastosować w dalszej analizie modele ML tekstowa zmienna objaniana należało zamienić na zmienna binarna, ktora dla parametru "stabliny" przyjmowala wartosc 1, a dla parametru "zgon" przyjmowala wartosc 0. 
+```{r}
+# dane$wynik <- as.factor(ifelse(dane$wynik == "stabilny", 1, 0))
+dane$wynik <- as.factor(dane$wynik)
+```
+ 
+Poniżej zaprezentowano wyniki analizy poszczególnych zmiennych wraz z wykresami pudełkowymi i histogramami
+
+## 3.1 Wiek
+```{r}
+ggplot(dane, aes(x = wiek, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = wiek, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+W przypadku wieku, że najwięcej badanych było w wieku około 60 lat.W całym badaniu brały osoby w przedziale wiekowym od 42 do 87 lat. Warto zaznaczyć, że rozkład zaprezentowany na wykresie pudełkowym różni się w zależności, czy nastąpił zgon, czy pacjent ustablilizował się. W przypadku zgonu mediana przesunięta jest na 55 lat zaś w przepadku stabilizacji na 61 lat. Jest to nieintuicyjny wniosek, bo można zauwazyć że w próbie wyższą śmiertelności zanotowano dla osób młodszych.
+
+## 3.2 Cholesterol
+```{r}
+ggplot(dane, aes(x = cholesterol, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = cholesterol, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+W przypadku cholesterolu średnia wartość wyniosła 6.105 mmol/l. Jeśli chodzi o normę cholesterolu calkowitego to wynosi ona około 5.2 mmol/l, co świadczy o tym, że w badaniu głównie brały udział osoby o podwyższonej wartości cholesterolu we krwi. Warto również zaznaczyć, że rozkłady dla pacjentów, którzy umarli oraz którzy przeżyli są podobne, choć w przypadku śmierci można zauważyć większą liczbę odstających niskich wartości zaś w przypadku przeżycia odnotowano większą liczbę wysokich wartości odstających. Dane dla pacjentów, którzy przeżyli charakteryzują się również większym rozrzutem.  
+
+## 3.3 CPK
+```{r}
+ggplot(dane, aes(x = CPK, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = CPK, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+W przypadku CPK norma u człowieka wynosi 24-170 IU/l dla kobiet i 24-195 IU/l dla mężczyzn. Dla badanych danych średnia wartość wyniosła 147.3, jednak warto zaznaczyć, że dane te nie zawierała informacji o płci badanej osoby.
+
+## 3.4 Stan kliniczny
+```{r}
+ggplot(dane, aes(x = stan_kliniczny, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = stan_kliniczny, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+## 3.5 Sód
+```{r}
+ggplot(dane, aes(x = sod, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = sod, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+W przypadku sodu prawidłowe zawartość w organizmie wynosi 135-145 mmol/l. Wśród badanych osób średnia wartość wyniosła 138.9 mmol/l. Można również zauważyć, że rozkład sodu dla badanych osób jest bardzo podobno zarówno w przypadku śmierci pacjenta jak i przeżycia.
+
+## 3.6 Cukier
+```{r}
+ggplot(dane, aes(x = cukier, fill = wynik)) + geom_histogram(alpha = 0.6, bins = 25)
+ggplot(dane, aes(x = wynik, y = cukier, fill = wynik)) + geom_boxplot(alpha = 0.8)
+```
+
+Jak widać zawartość cukru znacząco wpływa na końcowy stan pacjenta (śmierć lub przeżycie). Pacjenci, którzy przeżyli charakteryzowali się znacznie niższą zawartością cukru we krwi. 
+
+## 3.7 Wynik (objaśniana zmienna)
+```{r}
+barplot(table(dane$wynik))
+```
+
+Można zauważyć, że dla zbioru danych odnotowano większą liczbę przypadków przeżycia niż śmierci. 
+
+# 4. Podzial na zestaw testowy i uczacy
+
+W dalszej części analizy zajęto się problemem doboru odpowiedniego modelu ML do predykcji wartości zmiennej „wynik”. Pierwszym krokiem było podzielenie zbioru z danymi na uczący i testowy w stosunku 70-30.
+
+```{r}
+set.seed(1111)
+los <- createDataPartition(dane$wynik, p=0.7, list=FALSE)
+dane_uczace <- dane[los,]
+dane_testowe <- dane[-los,]
+```
+
+Sprawdzono również, czy uzyskane losowanie daje rzeczywiście losowe wartości w obydwu zbiorach. Jak widać poniżej zmienne charakteryzują się podobnym rozkładem co świadczy o poprawności podziału.
+```{r}
+summary(dane_testowe)
+summary(dane_uczace)
+```
+Po podziale danych obydwie grupy charakteryzowały się podobnymi rozkładami, co świadczy o poprawnym wydzieleniu danych uczących i testowych.
+
+Kolejnym krokiem bylo wyodrebnienie zbioru walidacyjnego. W tym celu rowniez zastosowano funkcję z pakietu caret - trainControl. Przygotowujac zbior walidacyjny zdecydowano na zastosowanie walidacji krzyzowej, dla k=5 probek. 
+```{r}
+fit_control_acc <- trainControl(method = "cv", number = 5)
+```
+
+Utworzony obiekt fit_control_acc posłużył do tworzenia modeli dla kryterium ACC. Do tworzenia modeli na podstawie kryterium ROC zastosowano poniższy obiekt fit_control_roc
+```{r}
+fit_control_roc <- trainControl(method = "cv", 
+                                number = 5,
+                                classProbs = TRUE,
+                                summaryFunction = twoClassSummary)
+```
+
+# 5. Model KNN
+Pierwszym z testowanych modeli ML byl model KNN.
+
+## 5.1 Implementacja
+Do generacji modelu KNN wykorzystano funkcję train(). Poniżej przedstawiono implementację. Dla sprawdzenia modelu tuningowano parametr k, czyli liczbę najbliższych sąsiadów.
+
+### 5.1.1 Kryterium ACC
+
+```{r}
+knn_acc <- train(wynik~.,
+                  data=dane_uczace,
+                  method = "knn",
+                  preProc = c("center", "scale"),
+                  trControl = fit_control_acc,
+                  tuneGrid = expand.grid(k = 3:25))
+knn_acc
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od liczby najbliższych sąsiadów k dla kryterium ACC.
+
+```{r}
+plot(knn_acc)
+```
+
+Jak widać najwyższą dokładności uzyskano dla wartości k = 4. Dla tej wartości k zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+knn_acc_pred_ucz <- predict(knn_acc, dane_uczace)
+knn_acc_tab_ucz <- table(knn_acc_pred_ucz, dane_uczace$wynik)
+knn_acc_tab_ucz
+sum(diag(knn_acc_tab_ucz)) / sum(knn_acc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+knn_acc_pred_test <- predict(knn_acc, dane_testowe)
+knn_acc_tab_test <- table(knn_acc_pred_test, dane_testowe$wynik)
+knn_acc_tab_test
+sum(diag(knn_acc_tab_test)) / sum(knn_acc_tab_test)
+```
+
+Na koniec dla kryterium ACC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+knn_acc_imp <- varImp(knn_acc)
+knn_acc_imp
+```
+
+
+### 5.1.2 Kryterium ROC
+
+```{r}
+knn_roc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "knn",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_roc,
+                 metric = "ROC",
+                 tuneGrid = expand.grid(k = 3:25))
+knn_roc
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od liczby najbliższych sąsiadów k dla kryterium acc.
+
+```{r}
+plot(knn_roc)
+```
+
+Jak widać najwyższą dokładności uzyskano dla wartości k = 7. Dla tej wartości k zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+knn_roc_pred_ucz <- predict(knn_roc, dane_uczace)
+knn_roc_tab_ucz <- table(knn_roc_pred_ucz, dane_uczace$wynik)
+knn_roc_tab_ucz
+sum(diag(knn_roc_tab_ucz)) / sum(knn_roc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+knn_roc_pred_test <- predict(knn_roc, dane_testowe)
+knn_roc_tab_test <- table(knn_roc_pred_test, dane_testowe$wynik)
+knn_roc_tab_test
+sum(diag(knn_roc_tab_test)) / sum(knn_roc_tab_test)
+```
+
+Na koniec również dla kryterium ROC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+knn_roc_imp <- varImp(knn_roc)
+knn_roc_imp
+```
+
+Porównując wyniki można zauwazyć, że dla obydwu kryteriów dokładność na danych testowych jest niższa niż dla danych uczących (odpowiednio 0.8862 i 0.9440 dla ACC i 0.9134 i 0.8802 dla ROC). Dokładność ta jest dodatkowo wyższa dla kryterium ACC, więc interpretowalność przedstawiono dla modelu stworzonego, dla tego kryterium.
+
+## 5.2 Interpretowalność
+Kolejnym etapem było sprawdzenie interpretowalności wyników modelu KNN. W tym celu posłużono się profilami Ceteris Paribus (PCP), wykresami częściowej zależności (PDP) oraz oszacowano wartości SHAP.
+
+### 5.2.1 PDP
+PDP to przykład interpretowalności globalnej. W naszym przypadku dzięki PDP będzie można określić jaki wpływ na wartość zmiennej objaśnianej ma zmienna objaśniająca i jak może wpływać zmiana jej wartości.
+
+```{r warning=FALSE, message=FALSE}
+knn_acc_exp<- explain(knn_acc, y=dane_uczace$wynik)
+pdp_knn <- variable_effect(explainer=knn_acc_exp,
+                           variables = c("cukier", "wiek", "cholesterol",
+                                         "CPK", "sod", "stan_kliniczny"))
+plot(pdp_knn)
+```
+
+Dla badanego modelu KNN wygenerowano wykres częściowej zależności PDP. Wykres daje nam sporo informacji odnośnie tego co wpływa na śmiertelność. Jak widać w przypadku wzrostu wartości cukru do 25 śmiertelność wynosi niemal 100%. Wartość cukru w tym przypadku jest decydująca i ma największy wpływ na  śmiertelność. Również wartość cholestrolu wpływa w dużym spotpniu na przeżycie. W przypadku wysokiej wartości cholesterolu (>6mmol/l) śmiertelność wynosi 35-50% natomiast dla wartości <4mmol/l śmiertelność wynosi już mniej niż 20%. Ciekawe wyniki uzyskano również dla sodu. Jego niska wartość <110 mmol/l skutkuje podwyższoną smiertelnością - powyżej 75%. Na koniec warto również spojerzeć na wiek. Uzyskano ciekawe wyniki, gdyż najniższą śmiertelnością w wyniku udaru charakteryzowały się osoby w wieku około 70 lat zaś najwyższą w wieku 50 lat i młodzsze. Zmienne CPK i stan kliniczny utrzymywały zbliżone prawdopodobieństwo śmiertelności bez względu na zmianę ich wartości.
+
+### 5.2.2 PCP
+PDP to przykład interpretowalności globalnej, ale o charakterze modułowym. W naszym przypadku dzięki PCP będzie można określić rokowania, dla konretnego pacjenta i zmiana jakich danych może zmniejszyć ryzyko śmierci.Do interpretacji wybrano 2 pacjentów ze zbioru danych.
+
+```{r}
+pacjent_1 = dane[55,]
+pcp_knn_1 <- predict_profile(explainer = knn_acc_exp,
+                            variables = c("cukier", "wiek", "cholesterol",
+                                          "CPK", "sod", "stan_kliniczny"),
+                            new_observation = pacjent_1)
+plot(pcp_knn_1)
+```
+
+W powyższym przypadku pacjent zmarł, ale warto się zastanowić co mógł zrobić, aby uniknąć śmierci. Z całą pewnością pacjent ten mógł polepszyć swoją sytuację przez zmniejszenie niektórych parametrów. Ze wzwględu na kombinację parametrów cholesterolu, cukru i stanu klinicznego nie miał szansy na przeżycie, ale już zminiejszenie wartości cukru z ~13 do 7 spowodowałoby spadek ryzyka śmierci o 75%.Również przypadku cholesterolu zmiana z 6mmol/l do 4.5mmol/l zmniejszyłaby w znacznym stopniu ryzyko śmierci. W mniejszym stopniu na przeżycie mogłaby wpłynąć zawartośc sodu. W przpadku pacjenta zmiana z 140 mmol/l do 120 ryzyko śmierci jest niższe o 25%. Jak widać pacjent był w trudnej sytuacji - na tyle trudnej, że na przeżycie nie wpłynęłaby zmiana wartości samego CPK. Ryzyko smierci jest 100-procentowe bez względu na wartość tego wskaźnika.
+
+Przeanalizujmy jeszcze jeden przypadek pacjenta
+```{r}
+pacjent_2 = dane[65,]
+pcp_knn_2 <- predict_profile(explainer = knn_acc_exp,
+                            variables = c("cukier", "wiek", "cholesterol",
+                                          "CPK", "sod", "stan_kliniczny"),
+                            new_observation = pacjent_2)
+plot(pcp_knn_2)
+```
+
+Również ten pacjent ma sporo do poprawy w swoim organizmie choć jego sytuacja jest znacznie lepsza. Przede wszystkim ma znacznie niższą wartość cukru, co w sporym stopniu zmniejsza ryzyko śmierci. W przypadku zmniejszenia zawartości cukru we krwi śmiertelność dałoby się jeszcze ograniczyć nawet do 25%. Na pewno zmniejszenie cholesterolu i sodu również wpłynęłoby na przeżycie pacjenta. W przypadku zmiany cholesterolu z ~6.1mmol/l do na przykłąd 5.6 mmol/l ryzyko jest niemal zerowe. Znacznie lepiej wyglądałaby również sytuacja pacjenta, gdyby był 10 lat starszy, no ale na to nie ma oczywiście żadnego wpływu.
+
+### 5.2.3 Shapley
+Na koniec interpretacji wyników modelu KNN przygotowano również wartość Shapleya dla powyższych dwóch pacjentów. Wartość Shapleya to z kolei przykład interpretacji loklnej. Dzięki niej możemy odpowiedzieć, ktore parametry wpłynęły na taki a nie inny status końcowy pacjenta w porównaniu z innymi parametrami. Interpretujemy więc konkretnego pacjenta.
+```{r}
+shap_knn_1 <- local_attributions(knn_acc_exp, pacjent_1)
+plot(shap_knn_1)
+```
+
+Jak można odczytać w przypadku pacjenta 1 najbardziej na ryzyko śmierci wpływa zawartość cukru, stan kliniczny, cholesterol. Wszystkie 3 wskaźniki zwiększają w jego przypadku ryzyko śmierci. Pacjent również był w niekorzystnym wieku (z punktu widzenia dostania udaru). W niewielkim stopniu na ryzyko śmierci wpłynęły sód oraz CPK (lekki spadek ryzyka śmierci dla tej wartości), co potwierdziła również analiza PCP.
+
+```{r}
+shap_knn_2 <- local_attributions(knn_acc_exp, pacjent_2)
+plot(shap_knn_2)
+```
+
+W przypadku pacjenta 2 na jego korzyść wpływa prawidłowa wartość cukru we krwi, ale pacjent ten jest grupie podwyższonego ryzyka ze względu na wiek, a na jego niekorzyść wpływają również wartości wskażników cholesterol oraz sód. Niewielki wpływ na ryzyko śmierci ma CPK oraz stan kliniczny - obydwie te wartości zmniejszają ryzyko śmierci.
+
+
+# 6. Model Random Forest
+Kolejnym z testowanych modeli ML byl algorytm random forest jako model drzewa decyzyjnego.
+
+## 6.1 Implementacja
+Do generacji modelu random forest wykorzystano funkcję train(). Poniżej przedstawiono implementację. Dla sprawdzenia modelu tuningowano parametry mtry, splitrule oraz min.node.size. Jeśli chodzi o wartość parametru mtry to jest to liczba wyników jaką losujemy z danych dla danego drzewa (wartość ta ograniczona jest przez liczbę zmiennych objaśniających. Wartość splitrule odpowiada za regułę na podstawie której losoujemy wartości. Min.node.size odpowiada za minimalną liczbę wygenerowanych drzew losowych.
+
+### 6.1.1 Kryterium ACC
+
+```{r}
+ranger_siatka <- expand.grid(mtry = c(1:6),
+                             splitrule =c("gini","extratrees","hellinger"),
+                             min.node.size = c(1:10))
+ranger_acc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "ranger",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_acc,
+                 tuneGrid = ranger_siatka)
+ranger_acc
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od wartości parametrów mtry, splitrule i min.node.size dla kryterium ACC.
+
+```{r}
+plot(ranger_acc)
+```
+
+Jak widać najwyższą dokładności uzyskano dla wartości mtry = 1, splitrule = extratrees i min.node.size = 2. Dla tych wartości zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+ranger_acc_pred_ucz <- predict(ranger_acc, dane_uczace)
+ranger_acc_tab_ucz <- table(ranger_acc_pred_ucz, dane_uczace$wynik)
+ranger_acc_tab_ucz
+sum(diag(ranger_acc_tab_ucz)) / sum(ranger_acc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+ranger_acc_pred_test <- predict(ranger_acc, dane_testowe)
+ranger_acc_tab_test <- table(ranger_acc_pred_test, dane_testowe$wynik)
+ranger_acc_tab_test
+sum(diag(ranger_acc_tab_test)) / sum(ranger_acc_tab_test)
+```
+
+<!-- Na koniec dla kryterium ACC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą -->
+<!-- # ```{r} -->
+<!-- # ranger_acc_imp <- varImp(ranger_acc) -->
+<!-- # ranger_acc_imp -->
+<!-- # ``` -->
+
+
+### 6.1.2 Kryterium ROC
+
+```{r}
+ranger_roc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "ranger",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_roc,
+                 metric = "ROC",
+                 tuneGrid = ranger_siatka)
+ranger_roc
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od wartości parametrów mtry, splitrule i min.node.size dla kryterium ROC.
+
+```{r}
+plot(ranger_roc)
+```
+
+Jak widać najwyższą dokładności uzyskano dla wartości mtry = 1, splitrule = extratrees i min.node.size = 1. Dla tych wartości zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+ranger_roc_pred_ucz <- predict(ranger_roc, dane_uczace)
+ranger_roc_tab_ucz <- table(ranger_roc_pred_ucz, dane_uczace$wynik)
+ranger_roc_tab_ucz
+sum(diag(ranger_roc_tab_ucz)) / sum(ranger_roc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+ranger_roc_pred_test <- predict(ranger_roc, dane_testowe)
+ranger_roc_tab_test <- table(ranger_roc_pred_test, dane_testowe$wynik)
+ranger_roc_tab_test
+sum(diag(ranger_roc_tab_test)) / sum(ranger_roc_tab_test)
+```
+
+<!-- Na koniec również dla kryterium ROC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą -->
+<!-- # ```{r} -->
+<!-- # ranger_roc_imp <- varImp(ranger_roc) -->
+<!-- # ranger_roc_imp -->
+<!-- # ``` -->
+
+Porównując wyniki można zauwazyć, że dla obydwu kryteriów dokładność na danych testowych jest niższa niż dla danych uczących. Dokładność ta jest dodatkowo wyższa dla kryterium ROC, więc interpretowalność przedstawiono dla modelu stworzonego, dla tego kryterium.
+
+<!-- ## 6.2 Interpretowalność -->
+<!-- Kolejnym etapem było sprawdzenie interpretowalności wyników modelu random forest. W tym celu posłużono się profilami Ceteris Paribus (PCP), wykresami częściowej zależności (PDP) oraz oszacowano wartości SHAP. -->
+
+<!-- ### 6.2.1 PDP -->
+<!-- ```{r warning=FALSE, message=FALSE} -->
+<!-- dane_uczace$wynik <- as.factor(ifelse(dane_uczace$wynik == "stabilny", 1, 0)) -->
+<!-- ranger_acc_exp<- explain(ranger_acc, data=dane_uczace, y=dane_uczace$wynik) -->
+<!-- pdp_ranger <- variable_effect(explainer=ranger_acc_exp, -->
+<!--                               variables = c("cukier", "wiek", "cholesterol", -->
+<!--                                             "CPK", "sod", "stan_kliniczny")) -->
+<!-- plot(pdp_ranger) -->
+<!-- ``` -->
+
+<!-- <!-- Dla badanego modelu KNN wygenerowano wykres częściowej zależności PDP. Wykres daje nam sporo informacji odnośnie tego co wpływa na śmiertelność. Jak widać w przypadku wzrostu wartości cukru do 25 śmiertelność wynosi niemal 100%. Wartość cukru w tym przypadku jest decydująca i ma największy wpływ na  śmiertelność. Również wartość cholestrolu wpływa w dużym spotpniu na przeżycie. W przypadku wysokiej wartości cholesterolu (>6mmol/l) śmiertelność wynosi 35-50% natomiast dla wartości <4mmol/l śmiertelność wynosi już mniej niż 20%. Ciekawe wyniki uzyskano również dla sodu. Jego niska wartość <110 mmol/l skutkuje podwyższoną smiertelnością - powyżej 75%. Na koniec warto również spojerzeć na wiek. Uzyskano ciekawe wyniki, gdyż najniższą śmiertelnością w wyniku udaru charakteryzowały się osoby w wieku około 70 lat zaś najwyższą w wieku 50 lat i młodzsze. Zmienne CPK i stan kliniczny utrzymywały zbliżone prawdopodobieństwo śmiertelności bez względu na zmianę ich wartości. -->
+
+<!-- ### 6.2.2 PCP -->
+<!-- Do interpretacji wybrano 2 pacjentów ze zbioru danych. -->
+
+<!-- ```{r} -->
+<!-- pacjent_1 = dane[55,] -->
+<!-- pcp_ranger_1 <- predict_profile(explainer = ranger_acc_exp, -->
+<!--                             variables = c("cukier", "wiek", "cholesterol", -->
+<!--                                           "CPK", "sod", "stan_kliniczny"), -->
+<!--                             new_observation = pacjent_1) -->
+<!-- plot(pcp_ranger_1) -->
+<!-- ``` -->
+
+<!-- <!-- W powyższym przypadku pacjent zmarł, ale warto się zastanowić co mógł zrobić, aby uniknąć śmierci. Z całą pewnością pacjent ten mógł polepszyć swoją sytuację przez zmniejszenie niektórych parametrów. Ze wzwględu na kombinację parametrów cholesterolu, cukru i stanu klinicznego nie miał szansy na przeżycie, ale już zminiejszenie wartości cukru z ~13 do 7 spowodowałoby spadek ryzyka śmierci o 75%.Również przypadku cholesterolu zmiana z 6mmol/l do 4.5mmol/l zmniejszyłaby w znacznym stopniu ryzyko śmierci. W mniejszym stopniu na przeżycie mogłaby wpłynąć zawartośc sodu. W przpadku pacjenta zmiana z 140 mmol/l do 120 ryzyko śmierci jest niższe o 25%. Jak widać pacjent był w trudnej sytuacji - na tyle trudnej, że na przeżycie nie wpłynęłaby zmiana wartości samego CPK. Ryzyko smierci jest 100-procentowe bez względu na wartość tego wskaźnika. -->
+
+<!-- ### 6.2.3 Shapley -->
+<!-- Na koniec interpretacji wyników modelu random forest przygotowano również wartość Shapleya dla powyższych dwóch pacjentów. -->
+<!-- ```{r} -->
+<!-- shap_ranger_1 <- local_attributions(ranger_acc_exp, pacjent_1) -->
+<!-- plot(shap_ranger_1) -->
+<!-- ``` -->
+
+<!-- <!-- Jak można odczytać w przypadku pacjenta 1 najbardziej na ryzyko śmierci wpływa zawartość cukru, stan kliniczny, cholesterol. Wszystkie 3 wskaźniki zwiększają w jego przypadku ryzyko śmierci. Pacjent również był w niekorzystnym wieku (z punktu widzenia dostania udaru). W niewielkim stopniu na ryzyko śmierci wpłynęły sód oraz CPK (lekki spadek ryzyka śmierci dla tej wartości), co potwierdziła również analiza PCP. -->
+
+
+# 7. Model Bagging
+Kolejnym z testowanych modeli ML byl algorytm bagging jako model drzewa decyzyjnego.
+
+## 7.1 Implementacja
+Do generacji modelu bagging wykorzystano funkcję train(). Poniżej przedstawiono implementację. Sprawdzany model nie miał tuningowanych parametrów.
+
+### 7.1.1 Kryterium ACC
+
+```{r}
+bag_acc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "treebag",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_acc)
+bag_acc
+```
+
+Dla takich parametróW zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+bag_acc_pred_ucz <- predict(bag_acc, dane_uczace)
+bag_acc_tab_ucz <- table(bag_acc_pred_ucz, dane_uczace$wynik)
+bag_acc_tab_ucz
+sum(diag(bag_acc_tab_ucz)) / sum(bag_acc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+bag_acc_pred_test <- predict(bag_acc, dane_testowe)
+bag_acc_tab_test <- table(bag_acc_pred_test, dane_testowe$wynik)
+bag_acc_tab_test
+sum(diag(bag_acc_tab_test)) / sum(bag_acc_tab_test)
+```
+
+Na koniec dla kryterium ACC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+bag_acc_imp <- varImp(bag_acc)
+bag_acc_imp
+```
+
+### 7.1.2 Kryterium ROC
+
+```{r}
+bag_roc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "treebag",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_roc,
+                 metric = "ROC")
+```
+
+Dla takich parametrów zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+bag_roc_pred_ucz <- predict(bag_roc, dane_uczace)
+bag_roc_tab_ucz <- table(bag_roc_pred_ucz, dane_uczace$wynik)
+bag_roc_tab_ucz
+sum(diag(bag_roc_tab_ucz)) / sum(bag_roc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+bag_roc_pred_test <- predict(bag_roc, dane_testowe)
+bag_roc_tab_test <- table(bag_roc_pred_test, dane_testowe$wynik)
+bag_roc_tab_test
+sum(diag(bag_roc_tab_test)) / sum(bag_roc_tab_test)
+```
+
+Na koniec również dla kryterium ROC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+bag_roc_imp <- varImp(bag_roc)
+bag_roc_imp
+```
+
+Porównując wyniki można zauwazyć, że dla obydwu kryteriów dokładność na danych testowych jest niższa niż dla danych uczących. Dokładność ta jest dodatkowo wyższa dla kryterium ACC, więc interpretowalność przedstawiono dla modelu stworzonego, dla tego kryterium.
+
+## 7.2 Interpretowalność
+Kolejnym etapem było sprawdzenie interpretowalności wyników modelu bagging. W tym celu posłużono się profilami Ceteris Paribus (PCP), wykresami częściowej zależności (PDP) oraz oszacowano wartości SHAP.
+
+### 7.2.1 PDP
+```{r warning=FALSE, message=FALSE}
+bag_acc_exp<- explain(bag_acc, data=dane_uczace, y=dane_uczace$wynik)
+pdp_bag <- variable_effect(explainer=bag_acc_exp,
+                              variables = c("cukier", "wiek", "cholesterol",
+                                            "CPK", "sod", "stan_kliniczny"))
+plot(pdp_bag)
+```
+
+Dla badanego modelu KNN wygenerowano wykres częściowej zależności PDP. Jak widać w przypadku wzrostu wartości cukru do 10 śmiertelność wynosi niemal 100%. Wartość cukru w tym przypadku jest decydująca i ma największy wpływ na  śmiertelność. Również wiek i stan kliniczny wpływają w dużym spotpniu na przeżycie. Znów najniższą śmiertelnością w wyniku udaru charakteryzowały się osoby w wieku około 70 lat zaś najwyższą w wieku 50 lat i młodzsze.
+
+### 7.2.2 PCP
+Do interpretacji wybrano pacjenta ze zbioru danych.
+
+```{r}
+pacjent_1 = dane[55,]
+pcp_bag <- predict_profile(explainer = bag_acc_exp,
+                            variables = c("cukier", "wiek", "cholesterol",
+                                          "CPK", "sod", "stan_kliniczny"),
+                            new_observation = pacjent_1)
+plot(pcp_bag)
+```
+
+W powyższym przypadku pacjent zmarł, ale warto się zastanowić co mógł zrobić, aby uniknąć śmierci. Ze wzwględu na wartość parametru cukier nie miał szansy na przeżycie, ale już jego zmniejszenie we krwi zminiejszenie wartości cukru z ~13 do 7 spowodowałoby spadek ryzyka śmierci o blisko 90%. Jak widać pacjent był w trudnej sytuacji - na tyle trudnej, że na przeżycie nie wpłynęłaby zmiana wartości samego CPK, cholesterolu, sodu czy stanu klinicznego. Ryzyko smierci jest 100-procentowe bez względu na wartości tych wskaźników.
+
+### 7.2.3 Shapley
+Na koniec interpretacji wyników modelu bagging przygotowano również wartość Shapleya dla powyższego pacjenta.
+```{r}
+shap_bag <- local_attributions(bag_acc_exp, pacjent_1)
+plot(shap_bag)
+```
+
+Jak można odczytać w przypadku pacjenta najbardziej na ryzyko śmierci wpływa zawartość cukru oraz wiek pacjenta. Są to dwie dominujące cechy. Pozostałe wskaźniki mają niewielkie zanczenia dla pacjenta lub nie mają go wcale.
+
+# 8. Model Boosting
+Pierwszym z testowanych modeli ML byl model boosting.
+
+## 8.1 Implementacja
+Do generacji modelu boosting wykorzystano funkcję train(). Poniżej przedstawiono implementację. Dla sprawdzenia modelu tuningowano parametry interaction.depth, n.trees, shrinkage oraz n.minobsinnode.
+
+### 8.1.1 Kryterium ACC
+```{r results='hide'}
+gbm_siatka = expand.grid(interaction.depth = seq(1, 5, by=1),
+                         n.trees = seq(100, 500, by=100),
+                         shrinkage = seq(0.01, 0.1, by=0.02),
+                         n.minobsinnode = c(5, 10, 15))
+gbm_acc <- train(wynik~.,
+                  data=dane_uczace,
+                  method = "gbm",
+                  preProc = c("center", "scale"),
+                  trControl = fit_control_acc,
+                  tuneGrid = gbm_siatka)
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od tuningowanych parametrów dla kryterium ACC.
+
+```{r fig.width=15, fig.height=10}
+plot(gbm_acc)
+```
+
+Dla optymalnych wartości tuningowanych parametróW zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+gbm_acc_pred_ucz <- predict(gbm_acc, dane_uczace)
+gbm_acc_tab_ucz <- table(gbm_acc_pred_ucz, dane_uczace$wynik)
+gbm_acc_tab_ucz
+sum(diag(gbm_acc_tab_ucz)) / sum(gbm_acc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+gbm_acc_pred_test <- predict(gbm_acc, dane_testowe)
+gbm_acc_tab_test <- table(gbm_acc_pred_test, dane_testowe$wynik)
+gbm_acc_tab_test
+sum(diag(gbm_acc_tab_test)) / sum(gbm_acc_tab_test)
+```
+
+Na koniec dla kryterium ACC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+gbm_acc_imp <- varImp(gbm_acc)
+gbm_acc_imp
+```
+
+
+### 8.1.2 Kryterium ROC
+
+```{r results='hide'}
+gbm_roc <- train(wynik~.,
+                 data=dane_uczace,
+                 method = "gbm",
+                 preProc = c("center", "scale"),
+                 trControl = fit_control_roc,
+                 metric = "ROC",
+                 tuneGrid = gbm_siatka)
+```
+
+Poniżej zaprezentowano wykres dokładności w zależności od tuningowanych parametrów dla kryterium ROC.
+
+```{r fig.width=15, fig.height=10}
+plot(gbm_roc)
+```
+
+Dla optymalnych wartości tuningowanych parametróW zbudowano model, dla którego poniżej przedstawiono macierz pomyłek i dokładność modelu.
+
+```{r}
+gbm_roc_pred_ucz <- predict(gbm_roc, dane_uczace)
+gbm_roc_tab_ucz <- table(gbm_roc_pred_ucz, dane_uczace$wynik)
+gbm_roc_tab_ucz
+sum(diag(gbm_roc_tab_ucz)) / sum(gbm_roc_tab_ucz)
+```
+
+Stworzony model użyto również do predykcji danych testowych
+
+```{r}
+gbm_roc_pred_test <- predict(gbm_roc, dane_testowe)
+gbm_roc_tab_test <- table(gbm_roc_pred_test, dane_testowe$wynik)
+gbm_roc_tab_test
+sum(diag(gbm_roc_tab_test)) / sum(gbm_roc_tab_test)
+```
+
+Na koniec również dla kryterium ROC sporządzono tabelę wpływu poszczególnych zmiennych na zmienną objaśnianą
+```{r}
+gbm_roc_imp <- varImp(gbm_roc)
+gbm_roc_imp
+```
+
+Porównując wyniki można zauwazyć, że dla obydwu kryteriów dokładność na danych testowych jest niższa niż dla danych uczących. Dokładność ta jest dodatkowo wyższa dla kryterium ROC, więc interpretowalność przedstawiono dla modelu stworzonego, dla tego kryterium.
+
+## 8.2 Interpretowalność
+Kolejnym etapem było sprawdzenie interpretowalności wyników modelu boosting. W tym celu posłużono się profilami Ceteris Paribus (PCP), wykresami częściowej zależności (PDP) oraz oszacowano wartości SHAP.
+
+### 8.2.1 PDP
+```{r warning=FALSE, message=FALSE}
+gbm_roc_exp<- explain(gbm_acc, data=dane_uczace, y=dane_uczace$wynik)
+pdp_gbm <- variable_effect(explainer=gbm_roc_exp,
+                              variables = c("cukier", "wiek", "cholesterol",
+                                            "CPK", "sod", "stan_kliniczny"))
+plot(pdp_gbm)
+```
+
+Dla badanego modelu boosting wygenerowano wykres częściowej zależności PDP. Jak widać w przypadku wzrostu wartości cukru do ~12 śmiertelność wynosi niemal 100%. Wartość cukru w tym przypadku jest decydująca i ma największy wpływ na  śmiertelność. Pozostałe zmienne mająznacznie mniejszy wpływ na śmiertelność u osób z udarem. Znów najniższą śmiertelnością w wyniku udaru charakteryzowały się osoby w wieku około 70 lat zaś najwyższą w wieku 50 lat. Co do zmiennych cholesterol i CPK to widać lekkie wzrosty i spadki dla prawdopodobieństwa śmierci, jednak wartości te wahają się w przedziale 35-50%. Zmienne sód i stan kliniczny niemal nie zmieniają prawdopodobieństwa śmierci niezależnie od ich wartości.
+
+### 8.2.2 PCP
+Do interpretacji wybrano pacjenta ze zbioru danych. Po raz kolejny badanym pacjentem bęDzie pacjent 55.
+
+```{r}
+pacjent_1 = dane[55,]
+pcp_gbm <- predict_profile(explainer = gbm_roc_exp,
+                            variables = c("cukier", "wiek", "cholesterol",
+                                          "CPK", "sod", "stan_kliniczny"),
+                            new_observation = pacjent_1)
+plot(pcp_gbm)
+```
+
+W powyższym przypadku pacjent zmarł. Ze wzwględu na wartość parametru cukier nie miał szansy na przeżycie, ale już jego zmniejszenie we krwi z ~13 do 9 spowodowałoby spadek ryzyka śmierci o blisko 90%. Jak widać pacjent był w trudnej sytuacji - na tyle trudnej, że na przeżycie nie wpłynęłaby zmiana wartości samego CPK, cholesterolu, sodu czy stanu klinicznego. Ryzyko smierci jest 100-procentowe bez względu na wartości tych wskaźników. Widać również, że dla modelu boosting pacjentowi nie pomogłoby również w znacznym stopnia, gdyby był starszy. Nawet, gdby był w wieku 70 lat ryzyko śmierci byłoby równe 80%.
+
+### 8.2.3 Shapley
+Na koniec interpretacji wyników modelu boosting przygotowano również wartość Shapleya dla powyższego pacjenta.
+```{r}
+shap_gbm <- local_attributions(gbm_roc_exp, pacjent_1)
+plot(shap_gbm)
+```
+
+Jak można odczytać w przypadku pacjenta znowu najbardziej na ryzyko śmierci wpływa zawartość cukru, jendak tym razem znacznie mniejszy wkład ma wiek pacjenta. Pozostałe wskaźniki mają niewielkie zanczenia dla pacjenta lub nie mają go wcale.
+
+# 9. Podsumowanie
+Celem projektu jest zastosowanie oraz sprawdzenie skuteczności i interpretowalności wybranych modeli ML. Do analizy wykorzystano zbior danych pochodzacy z pliku "udar.csv". W trakcie projektu wykorzystano nastepujące metody: KNN,Bagging, Random Forest oraz Boosting. Dla każdej z metod stworzono model, a nastepnie na podstawie zdolności predykcyjnych modelu sprawdzono jego dokładnośc na zbiorze testowym i uczącym oraz sprawdzono interpretowalność wyników predykcji. Każdy z wytworzonych modeli charakteryzował się bardzo wysokim współczynnikiem dokładności - żaden z modeli nie uzyskał wyniku poniżej 0.85 zarówno dla kryterium ACC jak i AUC. W trakcie wykonywania projektu sprawdzono również wpływ tuningowania parametrów poszczególnych moedli na wartości kryteriów decydujących o ostatecznej postaci modelu.
+
+Jeśli chodzi o interpretowalność wyników dla poszczególnych modeli, to wszystkie były zgodne, że kluczowe dla zmniejszenia ryzyka śmierci w przypadku udaru jest odpowiednia wartości cukru we krwi, a konkretnie <7. Kolejnym ciekawym aspektem jest wiek - osoby w wieku 70 lat mają najniższy ryzyko smierci zaś najwyższe mają osoby w wieku 50 lat. Niektóre modele wskazywały również na wpływ cholesterolu na śmiertelność, jednak w znacznie mniejszym stopniu niż cukier, czy przynależność do danej grupy wiekowej.
